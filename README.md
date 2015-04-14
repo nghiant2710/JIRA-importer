@@ -2,4 +2,4 @@
 
 ### Usage:
 
-TrelloParser.py <inputfile> <outputfile>
+TrelloParser.py `<inputfile>` `<outputfile>`
