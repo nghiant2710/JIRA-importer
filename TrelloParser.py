@@ -1,12 +1,30 @@
 import json
 import jira_models
 import sys
+import ConfigParser
 
 
-STATUS = ['Doing', 'Waiting for review', 'Waiting for Staging', 'Waiting for test', 'Waiting for Production']
+STATUS = {
+    'Doing':'IN PROGRESS',
+    'Waiting for review':'WAITING FOR REVIEW',
+    'Waiting for Staging':'WAITING FOR STAGING',
+    'Waiting for test':'WAITING FOR TESTING',
+    'Waiting for Production':'WAITING FOR PRODUCTION',
+    'Done':'DONE',
+    'Completed Features':'DONE'
+}
 LABEL_LIST = ['api', 'pinejs', 'devices', 'meta-resin', 'supervisor', 'ui', 'Devices', 'VPN', 'security',
               'builder' 'img-maker', 'resin-api', 'frontend', 'meta-resin', 'analytics', 'resin-img', 'resin-cli', 'cli',
               'registry', 'gitlab', 'e2e', 'yocto', 'cloud_formation']
+
+COMPONENT_LIST = ["devices","api", "git", "db", "ui", "proxy", "supervisor", "vpn", 'builder', 'pinejs']
+
+PRIORITY_LIST = {
+    'Highest':['Fast Lane [empty me]'],
+    'Medium':['[distribute]', 'Backlog', 'Technical Debt', 'Beta 5', 'Beta 4 - More Debt and Polish', 'Beta 3 - Paying Technical Debt', 'Beta 2 - A Little Polish', 'BitBucket issues'],
+    'Low':[]
+}
+
 
 # All action types on trello: https://trello.com/docs/api/card/index.html#get-1-cards-card-id-or-shortlink-actions
 ACTION_TYPE = ['createCard', 'commentCard']
@@ -15,10 +33,21 @@ USER_ROLES={
     2:'jira-users'
 }
 ISSUE_TYPE={
+    'R&D':'Feature',
+    'Proposed Features':'Feature',
+    'Completed Features':'Feature',
     1:'Bug',
     2:'Task',
     3:'Improvement',
-    4:'New Feature'
+}
+
+CONFIG_PATH='config.ini'
+CONFIG_KEYS={
+    1:'inputfilepath',
+    2:'outputfilepath',
+    3:'projectkey',
+    4:'issueswithchecklist',
+    5:'missinginfoissue'
 }
 
 class TrelloJSONParser:
@@ -26,34 +55,45 @@ class TrelloJSONParser:
 
     # labels contains all list's name in Trello with its id
     labels = {}
-    # checklists contains all checklists of cards in Trello
-    checklists = {}
+    status_labels = {}
+    # contains all cards with checklists in Trello
+    issue_with_checklists = {}
     # actions contains actions with action type in ACTION_TYPE
     # dict_actions maps cardShortID with its actions
     actions = {}
     dict_actions = {}
     # users contains list of members in Trello
-    users = []
+    users = {}
+    jira_users = {}
+    # list contains all missing info cards in Trello
+    missing_info_issue={}
 
     def __init__(self, path):
         self.data = json.loads(open(path).read())
+        #self.jira_users = json.loads(open('users.json').read())
+        for temp in self.jira_users['users']:
+            self.jira_users[temp[jira_models.User.fullname]] = temp[jira_models.User.name]
         self.import_trello_list()
-        self.import_checklist()
+        #self.import_checklist()
         self.import_actions()
         self.import_users()
 
     def import_trello_list(self):
         for temp in self.data['lists']:
-            if temp['name'] not in STATUS:
+            if temp['name'] not in STATUS.keys():
                 self.labels[temp['id']] = temp['name']
+            else:
+                if 'Completed Features' == temp['name']:
+                    self.labels[temp['id']] = temp['name']
+                self.status_labels[temp['id']] = temp['name']
 
-    def import_checklist(self):
-        for temp in self.data['checklists']:
-            id = temp['id']
-            contents = {temp['idCard']: 'CARD_ID'}
-            for checkItem in temp['checkItems']:
-                contents[checkItem['name']] = checkItem['state']
-                self.checklists[id] = contents
+    #def import_checklist(self):
+    #    for temp in self.data['checklists']:
+    #        id = temp['id']
+    #        contents = {}
+    #        for checkItem in temp['checkItems']:
+    #            contents[checkItem['name']] = checkItem['state']
+    #            self.checklists[id] = contents
 
     def import_actions(self):
         for temp in self.data['actions']:
@@ -68,10 +108,17 @@ class TrelloJSONParser:
     def import_users(self):
         for temp in self.data['members']:
             user = {}
-            user[jira_models.User.name] = temp['username']
-            user[jira_models.User.fullname] = temp['fullName']
+            full_name = temp['fullName']
+
+            if full_name == 'Petros Aggelatos':
+                full_name = 'Petros Angelatos'
+            elif full_name == 'Aleksis Brezas':
+                full_name = 'Alexis Brezas'
+
+            user[jira_models.User.fullname] = full_name
+            user[jira_models.User.name] = self.jira_users[full_name]
             user['id'] = temp['id']
-            self.users.append(user)
+            self.users[temp['id']]=user
 
     def parse_user(self):
         users_obj = []
@@ -92,13 +139,18 @@ class TrelloJSONParser:
         result.append(pj_obj)
         return result
 
+    def parse_component(self):
+        return COMPONENT_LIST
+
     def parse_issue(self):
         issues_obj = []
         for temp in self.data['cards']:
             if not temp['closed']:
                 issue = {}
+                missing_info_check= 0
                 card_short_id = temp['idShort']
-                issue[jira_models.Project.Issue.summary] = temp['name']
+                title = temp['name'].encode('utf-8')
+                issue[jira_models.Project.Issue.summary] = self.generate_issue_summary(temp)
                 issue[jira_models.Project.Issue.description] = temp['desc']
                 issue[jira_models.Project.Issue.externalId] = card_short_id
                 # Card has actions. Many cards are lack of information in json file
@@ -106,19 +158,38 @@ class TrelloJSONParser:
                     for actionId in self.dict_actions[card_short_id]:
                         if self.actions[actionId]['type'] == 'createCard':
                             issue[jira_models.Project.Issue.created] = self.actions[actionId]['date']
-                            issue[jira_models.Project.Issue.reporter] = self.actions[actionId]['memberCreator']['username']
+                            issue[jira_models.Project.Issue.reporter] = self.users[self.actions[actionId]['idMemberCreator']][jira_models.User.name]
+                            missing_info_check = 1
                             break
+                # check if card lost info
+                if missing_info_check == 0:
+                    self.missing_info_issue[temp['id']] = title
+                # check if card has checklist
+                if len(temp['idChecklists']) >0:
+                    self.issue_with_checklists[temp['id']] = title
                 # generate labels
-                issue[jira_models.Project.Issue.labels] = self.generate_issue_label(temp)
+                #issue[jira_models.Project.Issue.labels] = self.generate_issue_label(temp)
                 # add comments
                 issue[jira_models.Project.Issue.comments] = self.generate_issue_comment(temp)
+
+                # set assignee that is the first member of card
+                for pic in temp['idMembers']:
+                    if self.users.has_key(pic):
+                        issue[jira_models.Project.Issue.assignee] = self.users[pic][jira_models.User.name]
+
                 # set members which is a custom field instead of assignee (can only one person as assignee)
-                issue[jira_models.Project.Issue.customFieldValues] = self.generate_issue_member(temp)
+                issue[jira_models.Project.Issue.customFieldValues] = self.generate_issue_custom_content(temp)
                 # set issue type
-                if self.verify_bug(temp):
-                    issue[jira_models.Project.Issue.issueType] = ISSUE_TYPE[1]
-                else:
-                    issue[jira_models.Project.Issue.issueType] = ISSUE_TYPE[2]
+                issue[jira_models.Project.Issue.issueType] = self.generate_issue_type(temp)
+                # set issue state
+                state = self.generate_issue_state(temp)
+                if state != -1:
+                    issue[jira_models.Project.Issue.status] = state
+                # set issue components
+                issue[jira_models.Project.Issue.components] = self.generate_issue_component(temp)
+                # set priority
+                issue[jira_models.Project.Issue.priority] = self.generate_issue_priority(temp)
+
                 issues_obj.append(issue)
         return issues_obj
 
@@ -132,6 +203,43 @@ class TrelloJSONParser:
             labels.append(self.labels[card['idList']])
         return labels
 
+
+    def generate_issue_component(self,card):
+        components = []
+        str_name = card['name'].encode('utf-8')
+        for keyword in COMPONENT_LIST:
+            if str_name.lower().find('[resin-' + keyword.lower() + ']') > -1 or str_name.lower().find('[' + keyword.lower() + ']') > -1:
+                components.append(keyword)
+        if str_name.lower().find('[meta-resin]') > -1:
+            # set meta-resin in devices component
+            components.append(COMPONENT_LIST[0])
+        return components
+
+    def generate_issue_summary(self,card):
+        title = card['name'].encode('utf-8')
+        for keyword in COMPONENT_LIST:
+            if title.lower().find('[resin-' + keyword.lower() + ']') > -1 or title.lower().find('[' + keyword.lower() + ']') > -1:
+                title = title[(title.lower().rfind(']')+1):]
+        if title.lower().find('[meta-resin]') > -1:
+            title = title[(title.lower().rfind(']')+1):]
+        return title
+
+
+    def generate_issue_state(self,card):
+        if card['idList'] in self.status_labels.keys():
+            return STATUS[self.status_labels[card['idList']]]
+        return -1
+
+    def generate_issue_priority(self,card):
+        for priority in PRIORITY_LIST:
+            for group in PRIORITY_LIST[priority]:
+                if self.labels.has_key(card['idList']) and self.labels[card['idList']] == group:
+                    return priority
+                if self.status_labels.has_key(card['idList']) and self.status_labels[card['idList']] == group:
+                    return priority
+        return 'Low'
+
+
     def generate_issue_comment(self,card):
         comments = []
         card_short_id = card['idShort']
@@ -139,40 +247,86 @@ class TrelloJSONParser:
             for actionId in self.dict_actions[card_short_id]:
                 if self.actions[actionId]['type'] == 'commentCard':
                     comment = {}
-                    comment[jira_models.Project.Issue.Comment.author] = self.actions[actionId]['memberCreator']['username']
+                    comment[jira_models.Project.Issue.Comment.author] = self.users[self.actions[actionId]['idMemberCreator']][jira_models.User.name]
                     comment[jira_models.Project.Issue.Comment.created] = self.actions[actionId]['date']
                     comment[jira_models.Project.Issue.Comment.body] = self.actions[actionId]['data']['text']
                     comments.append(comment)
         return comments
 
-
-    def generate_issue_member(self,card):
-        members = []
+    def generate_issue_custom_content(self,card):
+        custom_contents = []
         pic_names = []
         for pic in card['idMembers']:
-            for x in self.users:
-                if pic == x['id']:
-                    pic_names.append(x[jira_models.User.name])
-        members.append({
+            if self.users.has_key(pic):
+                pic_names.append(self.users[pic][jira_models.User.name])
+        custom_contents.append({
             "fieldName": "Members",
             "fieldType": "com.atlassian.jira.plugin.system.customfieldtypes:multiuserpicker",
             "value": pic_names
         })
-        return members
+        #contents = []
+        #for id in card['idChecklists']:
+        #    if self.checklists.has_key(id):
+        #        for x in self.checklists[id].keys():
+        #            contents.append(x )
+        #custom_contents.append({
+        #    "fieldName": "Issue Checklist",
+        #    "fieldType": "com.atlassian.jira.plugin.system.customfieldtypes:multicheckboxes",
+        #    "value": contents
+        #})
+        return custom_contents
 
-    def verify_bug(self,card):
-        for label in card['labels']:
-            if label['name'] == 'BUG':
-                return True
-        return False
+    def generate_issue_type(self,card):
+        if self.status_labels.has_key(card['idList']) and self.status_labels[card['idList']] in ISSUE_TYPE.keys():
+            return ISSUE_TYPE[self.status_labels[card['idList']]]
+        if self.labels.has_key(card['idList']) and self.labels[card['idList']] in ISSUE_TYPE.keys():
+            return ISSUE_TYPE[self.labels[card['idList']]]
+        return ISSUE_TYPE[2]
 
-json_file_path = sys.argv[1]
-output_file_path = sys.argv[2]
+    def export_issue_with_checklists(self,path):
+        f = open(path,'w')
+        f.write('Cards with checklist:\n')
+        for issue in self.issue_with_checklists.values():
+            f.write(issue+'\n')
+        f.close()
+
+    def export_missing_info_issue(self,path):
+        f = open(path,'w')
+        f.write('Missing Info Cards:\n')
+        for issue in self.missing_info_issue.values():
+            f.write(issue+'\n')
+        f.close()
+
+
+
+def read_config_section(section):
+    config_reader = ConfigParser.ConfigParser()
+    config_reader.read(CONFIG_PATH)
+    config_data = {}
+    options = config_reader.options(section)
+    for option in options:
+        try:
+            config_data[option] = config_reader.get(section, option)
+        except:
+            config_data[option] = None
+    return config_data
+
+
+config = read_config_section('Parameters')
+json_file_path = config[CONFIG_KEYS[1]]
+output_file_path = config[CONFIG_KEYS[2]]
+checklist_file = config[CONFIG_KEYS[4]]
+missing_file = config[CONFIG_KEYS[5]]
 parser = TrelloJSONParser(json_file_path)
 obj = {}
-obj['users'] = parser.parse_user()
-obj['projects'] = parser.parse_project('RESINDEV')
+
+#obj['users'] = parser.parse_user()
+obj['projects'] = parser.parse_project(config[CONFIG_KEYS[3]])
+obj['projects'][0]['components'] = parser.parse_component()
 obj['projects'][0]['issues'] = parser.parse_issue()
+
+parser.export_issue_with_checklists(checklist_file)
+parser.export_missing_info_issue(missing_file)
 
 with open(output_file_path, 'w') as outfile:
     json.dump(obj, outfile)

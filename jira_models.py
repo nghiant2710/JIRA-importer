@@ -41,13 +41,10 @@ class Project:
         history='history'
         comments='comments'
         customFieldValues='customFieldValues'
+        components='components'
         class Comment:
             body='body'
             author='author'
             created='created'
-        class Worklog:
-            author='author'
-            comment='comment'
-            startDate='startDate'
-            timeSpent='timeSpent'
+
 
