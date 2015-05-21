@@ -70,7 +70,7 @@ class TrelloJSONParser:
 
     def __init__(self, path):
         self.data = json.loads(open(path).read())
-        #self.jira_users = json.loads(open('users.json').read())
+        self.jira_users = json.loads(open('users.json').read())
         for temp in self.jira_users['users']:
             self.jira_users[temp[jira_models.User.fullname]] = temp[jira_models.User.name]
         self.import_trello_list()
@@ -185,6 +185,8 @@ class TrelloJSONParser:
                 state = self.generate_issue_state(temp)
                 if state != -1:
                     issue[jira_models.Project.Issue.status] = state
+                if state == STATUS['Done']:
+                    issue[jira_models.Project.Issue.resolution] = 'Resolved'
                 # set issue components
                 issue[jira_models.Project.Issue.components] = self.generate_issue_component(temp)
                 # set priority
