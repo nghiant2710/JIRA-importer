@@ -5,23 +5,18 @@ import ConfigParser
 
 
 STATUS = {
-    'Doing':'IN PROGRESS',
-    'Waiting for review':'WAITING FOR REVIEW',
-    'Waiting for Staging':'WAITING FOR STAGING',
-    'Waiting for test':'WAITING FOR TESTING',
-    'Waiting for Production':'WAITING FOR PRODUCTION',
-    'Done':'DONE',
-    'Completed Features':'DONE'
+    'To Do':'TO DO',
+    'Waiting for Implementation':'REVIEWING',
+    'On going tasks (don\'t end)':'IN PROGRESS',
+    'Done':'DONE'
 }
-LABEL_LIST = ['api', 'pinejs', 'devices', 'meta-resin', 'supervisor', 'ui', 'Devices', 'VPN', 'security',
-              'builder' 'img-maker', 'resin-api', 'frontend', 'meta-resin', 'analytics', 'resin-img', 'resin-cli', 'cli',
-              'registry', 'gitlab', 'e2e', 'yocto', 'cloud_formation']
+LABEL_LIST = ["docs", "internal-docs", "Community", "website", "mailing-list", "news.resin.io", "docs.resin.io", "Public profiles", "resin.io", "dashboard.resin.io", "social-media", "Website", "data", "talk.resin.io", "blog", "ui" ]
 
 COMPONENT_LIST = ["devices","api", "git", "db", "ui", "proxy", "supervisor", "vpn", 'builder', 'pinejs']
 
 PRIORITY_LIST = {
-    'Highest':['Fast Lane [empty me]'],
-    'Medium':['[distribute]', 'Backlog', 'Technical Debt', 'Beta 5', 'Beta 4 - More Debt and Polish', 'Beta 3 - Paying Technical Debt', 'Beta 2 - A Little Polish', 'BitBucket issues'],
+    'Highest':[],
+    'Medium':[],
     'Low':[]
 }
 
@@ -83,8 +78,6 @@ class TrelloJSONParser:
             if temp['name'] not in STATUS.keys():
                 self.labels[temp['id']] = temp['name']
             else:
-                if 'Completed Features' == temp['name']:
-                    self.labels[temp['id']] = temp['name']
                 self.status_labels[temp['id']] = temp['name']
 
     #def import_checklist(self):
@@ -116,7 +109,10 @@ class TrelloJSONParser:
                 full_name = 'Alexis Brezas'
 
             user[jira_models.User.fullname] = full_name
-            user[jira_models.User.name] = self.jira_users[full_name]
+            if full_name not in self.jira_users.keys():
+                user[jira_models.User.name] = full_name
+            else:
+                user[jira_models.User.name] = self.jira_users[full_name]            
             user['id'] = temp['id']
             self.users[temp['id']]=user
 
@@ -158,7 +154,8 @@ class TrelloJSONParser:
                     for actionId in self.dict_actions[card_short_id]:
                         if self.actions[actionId]['type'] == 'createCard':
                             issue[jira_models.Project.Issue.created] = self.actions[actionId]['date']
-                            issue[jira_models.Project.Issue.reporter] = self.users[self.actions[actionId]['idMemberCreator']][jira_models.User.name]
+                            if self.actions[actionId]['idMemberCreator'] in self.users.keys():
+                                issue[jira_models.Project.Issue.reporter] = self.users[self.actions[actionId]['idMemberCreator']][jira_models.User.name]
                             missing_info_check = 1
                             break
                 # check if card lost info
@@ -168,7 +165,7 @@ class TrelloJSONParser:
                 if len(temp['idChecklists']) >0:
                     self.issue_with_checklists[temp['id']] = title
                 # generate labels
-                #issue[jira_models.Project.Issue.labels] = self.generate_issue_label(temp)
+                issue[jira_models.Project.Issue.labels] = self.generate_issue_label(temp)
                 # add comments
                 issue[jira_models.Project.Issue.comments] = self.generate_issue_comment(temp)
 
@@ -188,7 +185,7 @@ class TrelloJSONParser:
                 if state == STATUS['Done']:
                     issue[jira_models.Project.Issue.resolution] = 'Resolved'
                 # set issue components
-                issue[jira_models.Project.Issue.components] = self.generate_issue_component(temp)
+                #issue[jira_models.Project.Issue.components] = self.generate_issue_component(temp)
                 # set priority
                 issue[jira_models.Project.Issue.priority] = self.generate_issue_priority(temp)
 
@@ -249,7 +246,8 @@ class TrelloJSONParser:
             for actionId in self.dict_actions[card_short_id]:
                 if self.actions[actionId]['type'] == 'commentCard':
                     comment = {}
-                    comment[jira_models.Project.Issue.Comment.author] = self.users[self.actions[actionId]['idMemberCreator']][jira_models.User.name]
+                    if self.actions[actionId]['idMemberCreator'] in self.users.keys():
+                        comment[jira_models.Project.Issue.Comment.author] = self.users[self.actions[actionId]['idMemberCreator']][jira_models.User.name]
                     comment[jira_models.Project.Issue.Comment.created] = self.actions[actionId]['date']
                     comment[jira_models.Project.Issue.Comment.body] = self.actions[actionId]['data']['text']
                     comments.append(comment)
@@ -324,7 +322,7 @@ obj = {}
 
 #obj['users'] = parser.parse_user()
 obj['projects'] = parser.parse_project(config[CONFIG_KEYS[3]])
-obj['projects'][0]['components'] = parser.parse_component()
+#obj['projects'][0]['components'] = parser.parse_component()
 obj['projects'][0]['issues'] = parser.parse_issue()
 
 parser.export_issue_with_checklists(checklist_file)
