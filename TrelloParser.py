@@ -10,9 +10,13 @@ STATUS = {
     'On going tasks (don\'t end)':'IN PROGRESS',
     'Done':'DONE'
 }
-LABEL_LIST = ["docs", "internal-docs", "Community", "website", "mailing-list", "news.resin.io", "docs.resin.io", "Public profiles", "resin.io", "dashboard.resin.io", "social-media", "Website", "data", "talk.resin.io", "blog", "ui" ]
+LABEL_LIST = {
+    'blue':'Icebox',
+    'green':'Low Priority',
+    'orange':'High Priority'
+}
 
-COMPONENT_LIST = ["devices","api", "git", "db", "ui", "proxy", "supervisor", "vpn", 'builder', 'pinejs']
+COMPONENT_LIST = ["Demos","Documentation", "Social media", "Mailing list/Newsletter", "Website", "Media", "Events", "Swag", "Services"]
 
 PRIORITY_LIST = {
     'Highest':[],
@@ -51,6 +55,7 @@ class TrelloJSONParser:
     # labels contains all list's name in Trello with its id
     labels = {}
     status_labels = {}
+    board_labels={}
     # contains all cards with checklists in Trello
     issue_with_checklists = {}
     # actions contains actions with action type in ACTION_TYPE
@@ -72,6 +77,7 @@ class TrelloJSONParser:
         #self.import_checklist()
         self.import_actions()
         self.import_users()
+        self.import_labels()
 
     def import_trello_list(self):
         for temp in self.data['lists']:
@@ -115,6 +121,11 @@ class TrelloJSONParser:
                 user[jira_models.User.name] = self.jira_users[full_name]            
             user['id'] = temp['id']
             self.users[temp['id']]=user
+
+    def import_labels(self):
+        for temp in self.data['labels']:
+            if temp['color'] in LABEL_LIST.keys():
+                self.board_labels[temp['id']]=temp['color']
 
     def parse_user(self):
         users_obj = []
@@ -177,7 +188,8 @@ class TrelloJSONParser:
                 # set members which is a custom field instead of assignee (can only one person as assignee)
                 issue[jira_models.Project.Issue.customFieldValues] = self.generate_issue_custom_content(temp)
                 # set issue type
-                issue[jira_models.Project.Issue.issueType] = self.generate_issue_type(temp)
+                #issue[jira_models.Project.Issue.issueType] = self.generate_issue_type(temp)
+                issue[jira_models.Project.Issue.issueType] = ISSUE_TYPE[2]
                 # set issue state
                 state = self.generate_issue_state(temp)
                 if state != -1:
@@ -185,33 +197,27 @@ class TrelloJSONParser:
                 if state == STATUS['Done']:
                     issue[jira_models.Project.Issue.resolution] = 'Resolved'
                 # set issue components
-                #issue[jira_models.Project.Issue.components] = self.generate_issue_component(temp)
+                issue[jira_models.Project.Issue.components] = self.generate_issue_component(temp)
                 # set priority
-                issue[jira_models.Project.Issue.priority] = self.generate_issue_priority(temp)
+                #issue[jira_models.Project.Issue.priority] = self.generate_issue_priority(temp)
+                issue[jira_models.Project.Issue.priority]= 'Low'
 
                 issues_obj.append(issue)
         return issues_obj
 
     def generate_issue_label(self, card):
         labels = []
-        str_name = card['name'].encode('utf-8')
-        for keyword in LABEL_LIST:
-            if str_name.lower().find('[' + keyword.lower() + ']') > -1:
-                labels.append(keyword)
-        if card['idList'] in self.labels.keys():
-            labels.append(self.labels[card['idList']])
+        for label in card['idLabels']:
+            if label in self.board_labels.keys():
+                labels.append(LABEL_LIST[self.board_labels[label]])
         return labels
 
 
     def generate_issue_component(self,card):
         components = []
-        str_name = card['name'].encode('utf-8')
-        for keyword in COMPONENT_LIST:
-            if str_name.lower().find('[resin-' + keyword.lower() + ']') > -1 or str_name.lower().find('[' + keyword.lower() + ']') > -1:
-                components.append(keyword)
-        if str_name.lower().find('[meta-resin]') > -1:
-            # set meta-resin in devices component
-            components.append(COMPONENT_LIST[0])
+        if card['idList'] in self.labels.keys():
+            if self.labels[card['idList']] in COMPONENT_LIST:
+                components.append(self.labels[card['idList']])
         return components
 
     def generate_issue_summary(self,card):
@@ -229,14 +235,14 @@ class TrelloJSONParser:
             return STATUS[self.status_labels[card['idList']]]
         return -1
 
-    def generate_issue_priority(self,card):
-        for priority in PRIORITY_LIST:
-            for group in PRIORITY_LIST[priority]:
-                if self.labels.has_key(card['idList']) and self.labels[card['idList']] == group:
-                    return priority
-                if self.status_labels.has_key(card['idList']) and self.status_labels[card['idList']] == group:
-                    return priority
-        return 'Low'
+    #def generate_issue_priority(self,card):
+        #for priority in PRIORITY_LIST:
+        #    for group in PRIORITY_LIST[priority]:
+        #        if self.labels.has_key(card['idList']) and self.labels[card['idList']] == group:
+        #            return priority
+        #        if self.status_labels.has_key(card['idList']) and self.status_labels[card['idList']] == group:
+        #            return priority
+        #return 'Low'
 
 
     def generate_issue_comment(self,card):
@@ -276,12 +282,12 @@ class TrelloJSONParser:
         #})
         return custom_contents
 
-    def generate_issue_type(self,card):
-        if self.status_labels.has_key(card['idList']) and self.status_labels[card['idList']] in ISSUE_TYPE.keys():
-            return ISSUE_TYPE[self.status_labels[card['idList']]]
-        if self.labels.has_key(card['idList']) and self.labels[card['idList']] in ISSUE_TYPE.keys():
-            return ISSUE_TYPE[self.labels[card['idList']]]
-        return ISSUE_TYPE[2]
+    #def generate_issue_type(self,card):
+        #if self.status_labels.has_key(card['idList']) and self.status_labels[card['idList']] in ISSUE_TYPE.keys():
+        #    return ISSUE_TYPE[self.status_labels[card['idList']]]
+        #if self.labels.has_key(card['idList']) and self.labels[card['idList']] in ISSUE_TYPE.keys():
+        #    return ISSUE_TYPE[self.labels[card['idList']]]
+        #return ISSUE_TYPE[2]
 
     def export_issue_with_checklists(self,path):
         f = open(path,'w')
@@ -322,7 +328,7 @@ obj = {}
 
 #obj['users'] = parser.parse_user()
 obj['projects'] = parser.parse_project(config[CONFIG_KEYS[3]])
-#obj['projects'][0]['components'] = parser.parse_component()
+obj['projects'][0]['components'] = parser.parse_component()
 obj['projects'][0]['issues'] = parser.parse_issue()
 
 parser.export_issue_with_checklists(checklist_file)
