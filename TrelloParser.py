@@ -6,7 +6,8 @@ import ConfigParser
 
 STATUS = {
     'To Do':'TO DO',
-    'Waiting for Implementation':'REVIEWING',
+    'Doing':'IN PROGRESS',
+    'Waiting':'WAITING',
     'On going tasks (don\'t end)':'IN PROGRESS',
     'Done':'DONE'
 }
@@ -176,7 +177,7 @@ class TrelloJSONParser:
                 if len(temp['idChecklists']) >0:
                     self.issue_with_checklists[temp['id']] = title
                 # generate labels
-                issue[jira_models.Project.Issue.labels] = self.generate_issue_label(temp)
+                #issue[jira_models.Project.Issue.labels] = self.generate_issue_label(temp)
                 # add comments
                 issue[jira_models.Project.Issue.comments] = self.generate_issue_comment(temp)
 
@@ -197,7 +198,7 @@ class TrelloJSONParser:
                 if state == STATUS['Done']:
                     issue[jira_models.Project.Issue.resolution] = 'Resolved'
                 # set issue components
-                issue[jira_models.Project.Issue.components] = self.generate_issue_component(temp)
+                #issue[jira_models.Project.Issue.components] = self.generate_issue_component(temp)
                 # set priority
                 #issue[jira_models.Project.Issue.priority] = self.generate_issue_priority(temp)
                 issue[jira_models.Project.Issue.priority]= 'Low'
@@ -328,7 +329,7 @@ obj = {}
 
 #obj['users'] = parser.parse_user()
 obj['projects'] = parser.parse_project(config[CONFIG_KEYS[3]])
-obj['projects'][0]['components'] = parser.parse_component()
+#obj['projects'][0]['components'] = parser.parse_component()
 obj['projects'][0]['issues'] = parser.parse_issue()
 
 parser.export_issue_with_checklists(checklist_file)
